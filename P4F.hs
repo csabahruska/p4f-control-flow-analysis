@@ -125,6 +125,25 @@ widenedFixExp aam e0 = go (mempty, mempty, mempty) where
     stackNext     = Map.unionsWith Set.union [sStack | (_, P4FState{..}) <- s]
     iNext         = (reachableNext, storeNext, stackNext)
 
+workListFixExp :: AAM -> Exp -> (Set Config, Store, Stack)
+workListFixExp aam e0 = go mempty mempty [initState] mempty where
+
+  initState = (e0, mempty, KAddr AddrHalt)
+
+  go store stack [] seen = (seen, store, stack)
+  go store stack ((exp, env, addrK):todo) seen = go storeNext stackNext todoNext seenNext where
+    s             = abstractEval aam exp (P4FState env store stack addrK)
+    storeNext     = Map.unionsWith Set.union $ store : [sStore | (_, P4FState{..}) <- s]
+    stackNext     = Map.unionsWith Set.union $ stack : [sStack | (_, P4FState{..}) <- s]
+    new           = [cfg | (e, P4FState{..}) <- s, let cfg = (e, sEnv, sStackAddr), Set.notMember cfg seen || storeNotIn sStore store || stackNotIn sStack stack]
+    todoNext      = new ++ todo
+    seenNext      = Set.union seen $ Set.fromList new
+
+storeNotIn :: Store -> Store -> Bool
+storeNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
+
+stackNotIn :: Stack -> Stack -> Bool
+stackNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
 
 -- value allocators
 
@@ -150,7 +169,7 @@ expId1 =
   LetApp ("id", Lam "a" $ Var "a",  Lam "x" $ Var "x") $
   LetApp ("y", Var "id", Lit "#t") $
   LetApp ("z", Var "id", Lit "#f") $
-  Var "#done"
+  Lit "#done"
 
 expId2 :: Exp
 expId2 =
@@ -167,7 +186,8 @@ expId3 =
   LetApp ("b", Var "f", Lit "#t") $
   Lit "#done"
 
-test exp = let (c,s,k) = simplifyAddr $ widenedFixExp p4f exp in pPrint ("Config", c, "Store", s, "Stack", k)
+test1 exp = let (c,s,k) = simplifyAddr $ widenedFixExp p4f exp in pPrint ("Config", c, "Store", s, "Stack", k)
+test2 exp = let (c,s,k) = simplifyAddr $ workListFixExp p4f exp in pPrint ("Config", c, "Store", s, "Stack", k)
 
 --
 -- utility prettyfier

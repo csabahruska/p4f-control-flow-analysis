@@ -42,10 +42,11 @@ data Addr
   | AddrIdExp   {addrId :: String, addrExp :: Exp}
   | AddrExp     {addrExp :: Exp}
   | AddrExpEnv  {addrExp :: Exp, addrEnv :: Env}
+  | AddrAAC     Exp Env Exp Env Store
   | AddrHalt
   deriving (Show, Eq, Ord)
 
-newtype AddrK = AddrK Addr
+newtype KAddr = KAddr Addr
   deriving (Show, Eq, Ord)
 
 
@@ -53,7 +54,7 @@ type Lam    = Exp -- Lam constructor only
 type Clo    = (Lam, Env)
 type Env    = Map Id Addr
 type Store  = Map Addr (Set Clo)
-type Stack  = Map AddrK (Set (Frame, AddrK)) -- NOTE: KStore in the article: Addr -> P(Kont)
+type Stack  = Map KAddr (Set (Frame, KAddr)) -- NOTE: KStore in the article: Addr -> P(Kont)
 type Frame  = (Id, Exp, Env)
 
 
@@ -71,19 +72,21 @@ allocKP4F = AddrExpEnv
 
 alloc :: Id -> (Exp, P4FState) -> Addr
 --alloc n _ = alloc0CFA n
-alloc n (e,_) = alloc1CFA n e
+--alloc n (e,_) = alloc1CFA n e
+alloc n (e, P4FState{..}) = allocKP4F e sEnv
 
 
-allocK :: (Exp, P4FState) -> Exp -> Env -> Store -> AddrK
---allocK _ exp env _ = AddrK $ allocKP4F exp env
-allocK _ exp env _ = AddrK $ allocK0 exp
+allocK :: (Exp, P4FState) -> Exp -> Env -> Store -> KAddr
+allocK _ exp env _ = KAddr $ allocKP4F exp env
+--allocK _ exp env _ = KAddr $ allocK0 exp
+--allocK (e, P4FState{..}) e' env store = KAddr $ AddrAAC e' env e sEnv sStore
 
 data P4FState
   = P4FState
   { sEnv        :: Env
   , sStore      :: Store
   , sStack      :: Stack
-  , sStackAddr  :: AddrK
+  , sStackAddr  :: KAddr
   }
   deriving (Show, Eq, Ord)
 
@@ -113,7 +116,7 @@ abstractEval exp p4fState@P4FState{..} = case exp of
     pure (e, P4FState env store sStack sStackAddr)
 
 --  Lit{} -> [(exp, p4fState)]
-  _ | sStackAddr == AddrK AddrHalt -> []--[(exp, p4fState)]
+  _ | sStackAddr == KAddr AddrHalt -> []--[(exp, p4fState)]
   -- atomic expression
   ae -> do
     ((x, e, envK), addrK) <- Set.toList $ Map.findWithDefault (error $ "ae not found " ++ show sStackAddr ++ " exp: " ++ show ae) sStackAddr sStack
@@ -125,12 +128,12 @@ abstractEval exp p4fState@P4FState{..} = case exp of
 
 -- global store widening
 
-type Config = (Exp, Env, AddrK)
+type Config = (Exp, Env, KAddr)
 
 widenedFixExp :: Exp -> (Set Config, Store, Stack)
 widenedFixExp e0 = go (mempty, mempty, mempty) where
 
-  initial = (e0, P4FState mempty mempty mempty $ AddrK AddrHalt)
+  initial = (e0, P4FState mempty mempty mempty $ KAddr AddrHalt)
 
   go :: (Set Config, Store, Stack) -> (Set Config, Store, Stack)
   go i@(reachable, store, stack) = if i == iNext then i else go iNext where
@@ -142,21 +145,29 @@ widenedFixExp e0 = go (mempty, mempty, mempty) where
 
 
 -- example
-testId :: Exp
-testId =
+expId1 :: Exp
+expId1 =
   LetApp ("id", Lam "a" $ Var "a",  Lam "x" $ Var "x") $
-  LetApp ("y", Var "id", Var "#t") $
-  LetApp ("z", Var "id", Var "#f") $
-  Var "#halt"
+  LetApp ("y", Var "id", Lit "#t") $
+  LetApp ("z", Var "id", Lit "#f") $
+  Var "#done"
 
-testId2 :: Exp
-testId2 =
+expId2 :: Exp
+expId2 =
   Let ("id", Lam "x" $ Var "x") $
   LetApp ("y", Var "id", Lit "#t") $
   LetApp ("z", Var "id", Lit "#f") $
   Lit "#done"
 
-test = let (c,s,k) = simplifyAddr $ widenedFixExp testId2 in pPrint ("Config", c, "Store", s, "Stack", k)
+expId3 :: Exp
+expId3 =
+  Let ("id", Lam "x" $ Var "x") $
+  Let ("f", Lam "y" $ LetApp ("f_result", Var "id", Var "y") $ Var "f_result") $
+  LetApp ("a", Var "f", Lit "1") $
+  LetApp ("b", Var "f", Lit "#t") $
+  Lit "#done"
+
+test exp = let (c,s,k) = simplifyAddr $ widenedFixExp exp in pPrint ("Config", c, "Store", s, "Stack", k)
 
 --
 -- utility prettyfier
@@ -177,8 +188,8 @@ intAddrM k = do
       | v <- AddrInt (Map.size m)
       -> put (Map.insert k v m) >> pure v
 
-visitAddrK :: AddrK -> Alloc AddrK
-visitAddrK (AddrK a) = AddrK <$> intAddrM a
+visitAddrK :: KAddr -> Alloc KAddr
+visitAddrK (KAddr a) = KAddr <$> intAddrM a
 
 simplifyAddr :: (Set Config, Store, Stack) -> (Set Config, Store, Stack)
 simplifyAddr result = evalState (go result) mempty where

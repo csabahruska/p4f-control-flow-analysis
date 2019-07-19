@@ -11,6 +11,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:
     P4F
+    HCFA
 
   build-depends:
     base,

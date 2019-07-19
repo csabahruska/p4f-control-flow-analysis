@@ -40,6 +40,8 @@ data Addr
   = AddrInt     Int
   | AddrId      String
   | AddrIdExp   {addrId :: String, addrExp :: Exp}
+  | AddrIdExpKAddr  {addrId :: String, addrExp :: Exp, addrReturn :: KAddr}
+  | AddrIdKAddr {addrId :: String, addrReturn :: KAddr}
   | AddrExp     {addrExp :: Exp}
   | AddrExpEnv  {addrExp :: Exp, addrEnv :: Env}
   | AddrAAC     Exp Env Exp Env Store
@@ -153,6 +155,12 @@ alloc0 n (e, P4FState{..}) = AddrId n
 alloc1 :: Id -> (Exp, P4FState) -> Addr
 alloc1 n (e, P4FState{..}) = AddrIdExp n e
 
+alloc0H :: Id -> (Exp, P4FState) -> Addr
+alloc0H n (e, P4FState{..}) = AddrIdKAddr n sStackAddr
+
+alloc1H :: Id -> (Exp, P4FState) -> Addr
+alloc1H n (e, P4FState{..}) = AddrIdExpKAddr n e sStackAddr
+
 -- kontinuation allocators
 
 allocK0 :: (Exp, P4FState) -> Exp -> Env -> Store -> KAddr
@@ -162,6 +170,8 @@ allocKP4F :: (Exp, P4FState) -> Exp -> Env -> Store -> KAddr
 allocKP4F (e, P4FState{..}) e' env store = KAddr $ AddrExpEnv e' env
 
 p4f = AAM alloc1 allocKP4F
+p4fH0 = AAM alloc0H allocKP4F
+p4fH1 = AAM alloc1H allocKP4F
 
 -- example
 expId1 :: Exp
@@ -194,8 +204,8 @@ expId4 =
   LetApp ("q", Var "y", Lit "1") $
   Lit "#done"
 
-test1 exp = let (c,s,k) = simplifyAddr $ widenedFixExp p4f exp in pPrint ("Config", c, "Store", s, "Stack", k)
-test2 exp = let (c,s,k) = simplifyAddr $ workListFixExp p4f exp in pPrint ("Config", c, "Store", s, "Stack", k)
+test1 exp = let (c,s,k) = simplifyAddr $ widenedFixExp p4fH1 exp  in pPrint ("Config", c, "Store", s, "Stack", k)
+test2 exp = let (c,s,k) = simplifyAddr $ workListFixExp p4fH1 exp in pPrint ("Config", c, "Store", s, "Stack", k)
 
 --
 -- utility prettyfier

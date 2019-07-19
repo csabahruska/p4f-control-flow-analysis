@@ -186,6 +186,14 @@ expId3 =
   LetApp ("b", Var "f", Lit "#t") $
   Lit "#done"
 
+expId4 :: Exp
+expId4 =
+  Let ("id", Lam "x" $ Var "x") $
+  LetApp ("y", Var "id", Var "id") $
+  LetApp ("z", Var "y", Lit "#f") $
+  LetApp ("q", Var "y", Lit "1") $
+  Lit "#done"
+
 test1 exp = let (c,s,k) = simplifyAddr $ widenedFixExp p4f exp in pPrint ("Config", c, "Store", s, "Stack", k)
 test2 exp = let (c,s,k) = simplifyAddr $ workListFixExp p4f exp in pPrint ("Config", c, "Store", s, "Stack", k)
 

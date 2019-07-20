@@ -85,15 +85,15 @@ abstractAtomicEval exp env store = case exp of
 abstractEval :: AAM -> Exp -> AAMState -> [(Exp, AAMState)]
 abstractEval AAM{..} exp aamState@AAMState{..} = case exp of
   LetApp (y, f, ae) e -> do
-    (Lam x e', lamEnv) <- Set.toList $ abstractAtomicEval f sEnv sStore
+    (Lam x lamBody, lamEnv) <- Set.toList $ abstractAtomicEval f sEnv sStore
     let env   = Map.insert x addr lamEnv
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
         addr  = alloc x (exp, aamState)
         hist  = Map.insert x addr sHistory
 
         stack = Map.insertWith Set.union addrK (Set.singleton $ ((y, e, sEnv, sHistory), sStackAddr)) sStack
-        addrK = allocK (exp, aamState) e' env store
-    pure (e', AAMState env store stack addrK hist)
+        addrK = allocK (exp, aamState) lamBody env store
+    pure (lamBody, AAMState env store stack addrK hist)
 
   Let (y, ae) e -> do
     let env   = Map.insert y addr sEnv
@@ -171,13 +171,13 @@ alloc1H n (e, AAMState{..}) = AddrIdExpKAddr n e sStackAddr
 -- kontinuation allocators
 
 allocK0 :: (Exp, AAMState) -> Exp -> Env -> Store -> KAddr
-allocK0 (e, AAMState{..}) e' env store = KAddr $ AddrExp e'
+allocK0 (caller, AAMState{..}) callee env store = KAddr $ AddrExp callee
 
 allocKP4F :: (Exp, AAMState) -> Exp -> Env -> Store -> KAddr
-allocKP4F (e, AAMState{..}) e' env store = KAddr $ AddrExpEnv e' env
+allocKP4F (caller, AAMState{..}) callee env store = KAddr $ AddrExpEnv callee env
 
 allocKH :: (Exp, AAMState) -> Exp -> Env -> Store -> KAddr
-allocKH (e, AAMState{..}) e' env store = KAddr $ AddrExpExpHistory e e' sHistory
+allocKH (caller, AAMState{..}) callee env store = KAddr $ AddrExpExpHistory caller callee sHistory
 
 -- CFA alorithm configuration
 

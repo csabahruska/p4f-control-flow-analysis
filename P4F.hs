@@ -30,12 +30,6 @@ data Exp
   | Lit String
   deriving (Show, Eq, Ord)
 
-{-
-  TODO:
-    - abstract interpreter
-  QUESTION:
-    - could we map the embedded language to the host language stack instead of the explicit one?
--}
 data Addr
   = AddrInt     Int
   | AddrId      String
@@ -51,6 +45,7 @@ data Addr
 newtype KAddr = KAddr Addr
   deriving (Show, Eq, Ord)
 
+-- Abstract Machine with the AAM approach (abstracting abstract machines)
 
 type Lam    = Exp -- Lam constructor only
 type Clo    = (Lam, Env)
@@ -59,8 +54,8 @@ type Store  = Map Addr (Set Clo)
 type Stack  = Map KAddr (Set (Frame, KAddr)) -- NOTE: KStore in the article: Addr -> P(Kont)
 type Frame  = (Id, Exp, Env)
 
-data P4FState
-  = P4FState
+data AAMState
+  = AAMState
   { sEnv        :: Env
   , sStore      :: Store
   , sStack      :: Stack
@@ -70,8 +65,8 @@ data P4FState
 
 data AAM
   = AAM
-  { alloc   :: Id -> (Exp, P4FState) -> Addr
-  , allocK  :: (Exp, P4FState) -> Exp -> Env -> Store -> KAddr
+  { alloc   :: Id -> (Exp, AAMState) -> Addr
+  , allocK  :: (Exp, AAMState) -> Exp -> Env -> Store -> KAddr
   }
 
 abstractAtomicEval :: AExp -> Env -> Store -> Set Clo
@@ -81,99 +76,103 @@ abstractAtomicEval exp env store = case exp of
   Lit{} -> Set.singleton (exp, mempty)
   _ -> error $ "unsupported atomic expression: " ++ show exp
 
-abstractEval :: AAM -> Exp -> P4FState -> [(Exp, P4FState)]
-abstractEval AAM{..} exp p4fState@P4FState{..} = case exp of
+abstractEval :: AAM -> Exp -> AAMState -> [(Exp, AAMState)]
+abstractEval AAM{..} exp aamState@AAMState{..} = case exp of
   LetApp (y, f, ae) e -> do
     (Lam x e', lamEnv) <- Set.toList $ abstractAtomicEval f sEnv sStore
     let env   = Map.insert x addr lamEnv
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
-        addr  = alloc x (exp, p4fState)
+        addr  = alloc x (exp, aamState)
 
         stack = Map.insertWith Set.union addrK (Set.singleton $ ((y, e, sEnv), sStackAddr)) sStack
-        addrK = allocK (exp, p4fState) e' env store
-    pure (e', P4FState env store stack addrK)
+        addrK = allocK (exp, aamState) e' env store
+    pure (e', AAMState env store stack addrK)
 
   Let (y, ae) e -> do
     let env   = Map.insert y addr sEnv
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
-        addr  = alloc y (exp, p4fState)
-    pure (e, P4FState env store sStack sStackAddr)
+        addr  = alloc y (exp, aamState)
+    pure (e, AAMState env store sStack sStackAddr)
 
---  Lit{} -> [(exp, p4fState)]
-  _ | sStackAddr == KAddr AddrHalt -> []--[(exp, p4fState)]
+--  Lit{} -> [(exp, aamState)]
+  _ | sStackAddr == KAddr AddrHalt -> []--[(exp, aamState)]
   -- atomic expression
   ae -> do
     ((x, e, envK), addrK) <- Set.toList $ Map.findWithDefault (error $ "ae not found " ++ show sStackAddr ++ " exp: " ++ show ae) sStackAddr sStack
     --((x, e, envK), addrK) <- Set.toList $ Map.findWithDefault (mempty) sStackAddr sStack
     let env   = Map.insert x addr envK
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
-        addr  = alloc x (exp, p4fState)
-    pure (e, P4FState env store sStack addrK)
+        addr  = alloc x (exp, aamState)
+    pure (e, AAMState env store sStack addrK)
 
--- global store widening
+-- fixedpoint solver with global store widening
 
 type Config = (Exp, Env, KAddr)
 
 widenedFixExp :: AAM -> Exp -> (Set Config, Store, Stack)
 widenedFixExp aam e0 = go (mempty, mempty, mempty) where
 
-  initial = (e0, P4FState mempty mempty mempty $ KAddr AddrHalt)
+  initState :: (Exp, AAMState)
+  initState = (e0, AAMState mempty mempty mempty $ KAddr AddrHalt)
 
   go :: (Set Config, Store, Stack) -> (Set Config, Store, Stack)
   go i@(reachable, store, stack) = if i == iNext then i else go iNext where
-    s             = concatMap (uncurry (abstractEval aam)) $ initial : [(e, P4FState env store stack addrK) | (e, env, addrK) <- Set.toList reachable]
-    reachableNext = Set.fromList [(e, sEnv, sStackAddr) | (e, P4FState{..}) <- s]
-    storeNext     = Map.unionsWith Set.union [sStore | (_, P4FState{..}) <- s]
-    stackNext     = Map.unionsWith Set.union [sStack | (_, P4FState{..}) <- s]
+    s             = concatMap (uncurry (abstractEval aam)) $ initState : [(e, AAMState env store stack addrK) | (e, env, addrK) <- Set.toList reachable]
+    reachableNext = Set.fromList [(e, sEnv, sStackAddr) | (e, AAMState{..}) <- s]
+    storeNext     = Map.unionsWith Set.union [sStore | (_, AAMState{..}) <- s]
+    stackNext     = Map.unionsWith Set.union [sStack | (_, AAMState{..}) <- s]
     iNext         = (reachableNext, storeNext, stackNext)
 
 workListFixExp :: AAM -> Exp -> (Set Config, Store, Stack)
 workListFixExp aam e0 = go mempty mempty [initState] mempty where
 
+  initState :: Config
   initState = (e0, mempty, KAddr AddrHalt)
 
+  go :: Store -> Stack -> [Config] -> Set Config -> (Set Config, Store, Stack)
   go store stack [] seen = (seen, store, stack)
   go store stack ((exp, env, addrK):todo) seen = go storeNext stackNext todoNext seenNext where
-    s             = abstractEval aam exp (P4FState env store stack addrK)
-    storeNext     = Map.unionsWith Set.union $ store : [sStore | (_, P4FState{..}) <- s]
-    stackNext     = Map.unionsWith Set.union $ stack : [sStack | (_, P4FState{..}) <- s]
-    new           = [cfg | (e, P4FState{..}) <- s, let cfg = (e, sEnv, sStackAddr), Set.notMember cfg seen || storeNotIn sStore store || stackNotIn sStack stack]
+    s             = abstractEval aam exp (AAMState env store stack addrK)
+    storeNext     = Map.unionsWith Set.union $ store : [sStore | (_, AAMState{..}) <- s]
+    stackNext     = Map.unionsWith Set.union $ stack : [sStack | (_, AAMState{..}) <- s]
+    new           = [cfg | (e, AAMState{..}) <- s, let cfg = (e, sEnv, sStackAddr), Set.notMember cfg seen || storeNotIn sStore store || stackNotIn sStack stack]
     todoNext      = new ++ todo
     seenNext      = Set.union seen $ Set.fromList new
 
-storeNotIn :: Store -> Store -> Bool
-storeNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
+  storeNotIn :: Store -> Store -> Bool
+  storeNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
 
-stackNotIn :: Stack -> Stack -> Bool
-stackNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
+  stackNotIn :: Stack -> Stack -> Bool
+  stackNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
 
 -- value allocators
 
-alloc0 :: Id -> (Exp, P4FState) -> Addr
-alloc0 n (e, P4FState{..}) = AddrId n
+alloc0 :: Id -> (Exp, AAMState) -> Addr
+alloc0 n (e, AAMState{..}) = AddrId n
 
-alloc1 :: Id -> (Exp, P4FState) -> Addr
-alloc1 n (e, P4FState{..}) = AddrIdExp n e
+alloc1 :: Id -> (Exp, AAMState) -> Addr
+alloc1 n (e, AAMState{..}) = AddrIdExp n e
 
-alloc0H :: Id -> (Exp, P4FState) -> Addr
-alloc0H n (e, P4FState{..}) = AddrIdKAddr n sStackAddr
+alloc0H :: Id -> (Exp, AAMState) -> Addr
+alloc0H n (e, AAMState{..}) = AddrIdKAddr n sStackAddr
 
-alloc1H :: Id -> (Exp, P4FState) -> Addr
-alloc1H n (e, P4FState{..}) = AddrIdExpKAddr n e sStackAddr
+alloc1H :: Id -> (Exp, AAMState) -> Addr
+alloc1H n (e, AAMState{..}) = AddrIdExpKAddr n e sStackAddr
 
 -- kontinuation allocators
 
-allocK0 :: (Exp, P4FState) -> Exp -> Env -> Store -> KAddr
-allocK0 (e, P4FState{..}) e' env store = KAddr $ AddrExp e'
+allocK0 :: (Exp, AAMState) -> Exp -> Env -> Store -> KAddr
+allocK0 (e, AAMState{..}) e' env store = KAddr $ AddrExp e'
 
-allocKP4F :: (Exp, P4FState) -> Exp -> Env -> Store -> KAddr
-allocKP4F (e, P4FState{..}) e' env store = KAddr $ AddrExpEnv e' env
+allocKP4F :: (Exp, AAMState) -> Exp -> Env -> Store -> KAddr
+allocKP4F (e, AAMState{..}) e' env store = KAddr $ AddrExpEnv e' env
 
 p4f = AAM alloc1 allocKP4F
 p4fH0 = AAM alloc0H allocKP4F
 p4fH1 = AAM alloc1H allocKP4F
 
--- example
+-- examples
+
 expId1 :: Exp
 expId1 =
   LetApp ("id", Lam "a" $ Var "a",  Lam "x" $ Var "x") $

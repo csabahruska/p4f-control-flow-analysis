@@ -33,12 +33,6 @@ data Exp
   | Lit String
   deriving (Show, Eq, Ord)
 
-{-
-  TODO:
-    - abstract interpreter
-  QUESTION:
-    - could we map the embedded language to the host language stack instead of the explicit one?
--}
 data Addr
   = AddrInt     Int
   | AddrId      String
@@ -55,6 +49,7 @@ data Addr
 newtype KAddr = KAddr Addr
   deriving (Show, Eq, Ord)
 
+-- Abstract Machine with the AAM approach (abstracting abstract machines)
 
 type Lam      = Exp -- Lam constructor only
 type Clo      = (Lam, Env)
@@ -126,11 +121,12 @@ type Config = (Exp, Env, KAddr, History)
 widenedFixExp :: AAM -> Exp -> (Set Config, Store, Stack)
 widenedFixExp aam e0 = go (mempty, mempty, mempty) where
 
-  initial = (e0, AAMState mempty mempty mempty (KAddr AddrHalt) mempty)
+  initState :: (Exp, AAMState)
+  initState = (e0, AAMState mempty mempty mempty (KAddr AddrHalt) mempty)
 
   go :: (Set Config, Store, Stack) -> (Set Config, Store, Stack)
   go i@(reachable, store, stack) = if i == iNext then i else go iNext where
-    s             = concatMap (uncurry (abstractEval aam)) $ initial : [(e, AAMState env store stack addrK hist) | (e, env, addrK, hist) <- Set.toList reachable]
+    s             = concatMap (uncurry (abstractEval aam)) $ initState : [(e, AAMState env store stack addrK hist) | (e, env, addrK, hist) <- Set.toList reachable]
     reachableNext = Set.fromList [(e, sEnv, sStackAddr, sHistory) | (e, AAMState{..}) <- s]
     storeNext     = Map.unionsWith Set.union [sStore | (_, AAMState{..}) <- s]
     stackNext     = Map.unionsWith Set.union [sStack | (_, AAMState{..}) <- s]
@@ -139,8 +135,10 @@ widenedFixExp aam e0 = go (mempty, mempty, mempty) where
 workListFixExp :: AAM -> Exp -> (Set Config, Store, Stack)
 workListFixExp aam e0 = go mempty mempty [initState] mempty where
 
+  initState :: Config
   initState = (e0, mempty, KAddr AddrHalt, mempty)
 
+  go :: Store -> Stack -> [Config] -> Set Config -> (Set Config, Store, Stack)
   go store stack [] seen = (seen, store, stack)
   go store stack ((exp, env, addrK, hist):todo) seen = go storeNext stackNext todoNext seenNext where
     s             = abstractEval aam exp (AAMState env store stack addrK hist)
@@ -150,11 +148,11 @@ workListFixExp aam e0 = go mempty mempty [initState] mempty where
     todoNext      = new ++ todo
     seenNext      = Set.union seen $ Set.fromList new
 
-storeNotIn :: Store -> Store -> Bool
-storeNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
+  storeNotIn :: Store -> Store -> Bool
+  storeNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
 
-stackNotIn :: Stack -> Stack -> Bool
-stackNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
+  stackNotIn :: Stack -> Stack -> Bool
+  stackNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
 
 -- value allocators
 
@@ -188,7 +186,8 @@ p4fH0 = AAM alloc0H allocKP4F
 p4fH1 = AAM alloc1H allocKP4F
 hCFA = AAM alloc0 allocKH
 
--- example
+-- examples
+
 expId1 :: Exp
 expId1 =
   LetApp ("id", Lam "a" $ Var "a",  Lam "x" $ Var "x") $

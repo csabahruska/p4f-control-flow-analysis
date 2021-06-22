@@ -31,14 +31,14 @@ data Exp
   deriving (Show, Eq, Ord)
 
 data Addr
-  = AddrInt     Int
-  | AddrId      String
-  | AddrIdExp   {addrId :: String, addrExp :: Exp}
+  = AddrInt         Int -- NOTE: only for the pretty printer
+  | AddrId          String
+  | AddrIdExp       {addrId :: String, addrExp :: Exp}
   | AddrIdExpKAddr  {addrId :: String, addrExp :: Exp, addrReturn :: KAddr}
-  | AddrIdKAddr {addrId :: String, addrReturn :: KAddr}
-  | AddrExp     {addrExp :: Exp}
-  | AddrExpEnv  {addrExp :: Exp, addrEnv :: Env}
-  | AddrAAC     Exp Env Exp Env Store
+  | AddrIdKAddr     {addrId :: String, addrReturn :: KAddr}
+  | AddrExp         {addrExp :: Exp}
+  | AddrExpEnv      {addrExp :: Exp, addrEnv :: Env}
+  | AddrAAC         Exp Env Exp Env Store
   | AddrHalt
   deriving (Show, Eq, Ord)
 
@@ -98,7 +98,8 @@ abstractEval AAM{..} exp aamState@AAMState{..} = case exp of
   _ | sStackAddr == KAddr AddrHalt -> []--[(exp, aamState)]
   -- atomic expression
   ae -> do
-    ((x, e, envK), addrK) <- Set.toList $ Map.findWithDefault (error $ "ae not found " ++ show sStackAddr ++ " exp: " ++ show ae) sStackAddr sStack
+    ((x, e, envK), addrK) <- Set.toList $
+        Map.findWithDefault (error $ "ae not found " ++ show sStackAddr ++ " exp: " ++ show ae) sStackAddr sStack
     --((x, e, envK), addrK) <- Set.toList $ Map.findWithDefault (mempty) sStackAddr sStack
     let env   = Map.insert x addr envK
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
@@ -117,10 +118,11 @@ widenedFixExp aam e0 = go (mempty, mempty, mempty) where
 
   go :: (Set Config, Store, Stack) -> (Set Config, Store, Stack)
   go i@(reachable, store, stack) = if i == iNext then i else go iNext where
-    s             = concatMap (uncurry (abstractEval aam)) $ initState : [(e, AAMState env store stack addrK) | (e, env, addrK) <- Set.toList reachable]
+    s             = concatMap (uncurry (abstractEval aam)) $
+                      initState : [(e, AAMState env store stack addrK) | (e, env, addrK) <- Set.toList reachable]
     reachableNext = Set.fromList [(e, sEnv, sStackAddr) | (e, AAMState{..}) <- s]
-    storeNext     = Map.unionsWith Set.union [sStore | (_, AAMState{..}) <- s]
-    stackNext     = Map.unionsWith Set.union [sStack | (_, AAMState{..}) <- s]
+    storeNext     = Map.unionsWith Set.union [sStore | (_, AAMState{..}) <- s]  -- HINT: store widening
+    stackNext     = Map.unionsWith Set.union [sStack | (_, AAMState{..}) <- s]  -- HINT: stack widening
     iNext         = (reachableNext, storeNext, stackNext)
 
 workListFixExp :: AAM -> Exp -> (Set Config, Store, Stack)
@@ -133,9 +135,13 @@ workListFixExp aam e0 = go mempty mempty [initState] mempty where
   go store stack [] seen = (seen, store, stack)
   go store stack ((exp, env, addrK):todo) seen = go storeNext stackNext todoNext seenNext where
     s             = abstractEval aam exp (AAMState env store stack addrK)
-    storeNext     = Map.unionsWith Set.union $ store : [sStore | (_, AAMState{..}) <- s]
-    stackNext     = Map.unionsWith Set.union $ stack : [sStack | (_, AAMState{..}) <- s]
-    new           = [cfg | (e, AAMState{..}) <- s, let cfg = (e, sEnv, sStackAddr), Set.notMember cfg seen || storeNotIn sStore store || stackNotIn sStack stack]
+    storeNext     = Map.unionsWith Set.union $ store : [sStore | (_, AAMState{..}) <- s]  -- HINT: store widening
+    stackNext     = Map.unionsWith Set.union $ stack : [sStack | (_, AAMState{..}) <- s]  -- HINT: stack widening
+    new           = [ cfg
+                    | (e, AAMState{..}) <- s
+                    , let cfg = (e, sEnv, sStackAddr)
+                    , Set.notMember cfg seen || storeNotIn sStore store || stackNotIn sStack stack
+                    ]
     todoNext      = new ++ todo
     seenNext      = Set.union seen $ Set.fromList new
 

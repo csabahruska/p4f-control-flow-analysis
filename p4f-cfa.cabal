@@ -12,6 +12,9 @@ library
   exposed-modules:
     P4F
     HCFA
+    P4FM
+    TestP4FM
+    Cmp
 
   build-depends:
     base,

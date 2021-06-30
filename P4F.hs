@@ -209,8 +209,9 @@ expId4 =
   LetApp ("q", Var "y", Lit "1") $
   Lit "#done"
 
-test1 exp = let (c,s,k) = simplifyAddr $ widenedFixExp p4fH1 exp  in pPrint ("Config", c, "Store", s, "Stack", k)
-test2 exp = let (c,s,k) = simplifyAddr $ workListFixExp p4fH1 exp in pPrint ("Config", c, "Store", s, "Stack", k)
+test1, test2 :: Exp -> IO String
+test1 exp = let (c,s,k) = simplifyAddr $ widenedFixExp p4fH1 exp  in pure $ ppShow ("Config", c, "Store", s, "Stack", k)
+test2 exp = let (c,s,k) = simplifyAddr $ workListFixExp p4fH1 exp in pure $ ppShow ("Config", c, "Store", s, "Stack", k)
 
 --
 -- utility prettyfier

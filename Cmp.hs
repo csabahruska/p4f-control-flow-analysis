@@ -1,3 +1,5 @@
+module Cmp where
+
 import qualified P4F
 import qualified TestP4FM
 
@@ -9,4 +11,3 @@ cmp = do
   putStrLn a
   print "P4FM"
   putStrLn b
-

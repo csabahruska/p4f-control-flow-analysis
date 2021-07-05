@@ -53,6 +53,7 @@ type Frame  = (Id, Exp, Env)
 data AAMState
   = AAMState
   { sStore      :: Store
+  -- stack section
   , sStack      :: Stack
   , sStackTop   :: KAddr
   }
@@ -113,11 +114,11 @@ stackPop = do
   Eval
 -}
 abstractAtomicEval :: Env -> AExp -> M (Set Clo)
-abstractAtomicEval env exp = do
+abstractAtomicEval localEnv exp = do
   store <- gets sStore
   case exp of
-    Var n -> pure $ store Map.! (env Map.! n)
-    Lam{} -> pure $ Set.singleton (exp, env)
+    Var n -> pure $ store Map.! (localEnv Map.! n)
+    Lam{} -> pure $ Set.singleton (exp, localEnv)
     Lit{} -> pure $ Set.singleton (exp, mempty)
     _ -> error $ "unsupported atomic expression: " ++ show exp
 
@@ -146,13 +147,15 @@ abstractEval localEnv exp = do
       pure (e, extendedEnv)
 
     ae -> do
-      (x, e, env) <- stackPop
-
+      -- lookup atomic value
       val <- abstractAtomicEval localEnv ae
+
+      -- bind the return value to a variable in caller's environment
+      (x, e, callerEnv) <- stackPop
+
       valAddr <- alloc x exp
       extendStore val valAddr
-
-      let extendedEnv = extendEnv x valAddr env
+      let extendedEnv = extendEnv x valAddr callerEnv
       pure (e, extendedEnv)
 
 ------------
@@ -161,17 +164,17 @@ abstractEval localEnv exp = do
 -}
 type Config = (Exp, Env, KAddr)
 
+storeNotIn :: Store -> Store -> Bool
+storeNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
+
+stackNotIn :: Stack -> Stack -> Bool
+stackNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
+
 workListFixExp :: Exp -> D (Set Config, Store, Stack)
 workListFixExp e0 = go mempty mempty [initState] mempty where
 
   initState :: Config
   initState = (e0, mempty, KAddr AddrHalt)
-
-  storeNotIn :: Store -> Store -> Bool
-  storeNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
-
-  stackNotIn :: Stack -> Stack -> Bool
-  stackNotIn small big = not $ Map.isSubmapOfBy Set.isSubsetOf small big
 
   go :: Store -> Stack -> [Config] -> Set Config -> D (Set Config, Store, Stack)
   go store stack [] seen = pure (seen, store, stack)
@@ -187,3 +190,10 @@ workListFixExp e0 = go mempty mempty [initState] mempty where
         todoNext  = new ++ todo
         seenNext  = Set.union seen $ Set.fromList new
     go storeNext stackNext todoNext seenNext
+{-
+  To think about:
+    - empty stack, machine termination
+    - non-determinism (eval vs atomic-eval)
+    - value allocation on store, can it be an atomic operation and be hidden by a utility function?
+    - how to return the final value of the evaluation?
+-}

@@ -13,6 +13,7 @@ library
     P4F
     HCFA
     P4FM
+    P4FM2
     TestP4FM
     Cmp
 

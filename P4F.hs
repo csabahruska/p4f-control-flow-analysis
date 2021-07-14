@@ -83,15 +83,18 @@ abstractEval AAM{..} exp aamState@AAMState{..} = case exp of
     let env   = Map.insert x addr lamEnv
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
         addr  = alloc x (exp, aamState)
+                -- ALLOC ROLES: called binder, caller exp, caller state
 
         stack = Map.insertWith Set.union addrK (Set.singleton $ ((y, e, sEnv), sStackAddr)) sStack
         addrK = allocK (exp, aamState) lamBody env store
+                -- ALLOC ROLES: caller exp, caller state, called exp, called env, store as called sees it
     pure (lamBody, AAMState env store stack addrK)
 
   Let (y, ae) e -> do
     let env   = Map.insert y addr sEnv
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
         addr  = alloc y (exp, aamState)
+              -- ALLOC ROLES: caller binder, caller exp, caller state
     pure (e, AAMState env store sStack sStackAddr)
 
 --  Lit{} -> [(exp, aamState)]
@@ -104,6 +107,7 @@ abstractEval AAM{..} exp aamState@AAMState{..} = case exp of
     let env   = Map.insert x addr envK
         store = Map.insertWith Set.union addr (abstractAtomicEval ae sEnv sStore) sStore
         addr  = alloc x (exp, aamState)
+              -- ALLOC ROLES: caller binder, called exp, called state
     pure (e, AAMState env store sStack addrK)
 
 -- fixedpoint solver with global store widening

@@ -117,6 +117,17 @@ stackPop = do
         modify' $ \s -> s {sStackTop = newStackTop}
         pure $ Just frame
 
+peekStackTopId :: M Id
+peekStackTopId = do
+  stackTop <- gets sStackTop
+  case stackTop of
+    KAddr AddrHalt -> pure ""
+    _ -> Map.lookup stackTop <$> gets sStack >>= \case
+      Nothing     -> fail $ "missing stack frame for: " ++ show stackTop
+      Just frames -> do
+        ((var, _, _), _) <- lift . ListT . pure $ Set.toList frames
+        pure var
+
 {-
   Eval
 -}
@@ -149,15 +160,16 @@ abstractEval localEnv exp = do
           progPoint   = (closureEnv, lamBody)
       stackPush progPoint (y, e, localEnv)
       pure $ Next lamBody closureEnv
-{-
+
     Let (y, ae) e -> do
       val <- abstractAtomicEval localEnv ae
-      valAddr <- alloc y exp -- HINT: local program point ; this is WRONG because it is not 1-CFA value allocator
+      x <- peekStackTopId -- HINT: needed for correct 1-CFA value allocator
+      valAddr <- alloc x exp
       extendStore val valAddr
 
       let extendedEnv = extendEnv y valAddr localEnv
       pure $ Next e extendedEnv
--}
+
     ae -> do
       -- lookup atomic value
       val <- abstractAtomicEval localEnv ae

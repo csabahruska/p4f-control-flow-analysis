@@ -13,15 +13,20 @@ library
     P4F
     HCFA
     P4FM
+    P4FM_LogicT
+    P4FM_Effect
     P4FM2
     TestP4FM
+    TestP4FM_Effect
     Cmp
 
   build-depends:
     base,
     mtl,
+    logict,
     containers,
-    pretty-show
+    pretty-show,
+    fused-effects
 
   hs-source-dirs:      .
   default-language:    Haskell2010

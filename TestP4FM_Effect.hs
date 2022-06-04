@@ -1,5 +1,5 @@
 {-# LANGUAGE LambdaCase, RecordWildCards, TupleSections #-}
-module TestP4FM where
+module TestP4FM_Effect where
 
 import Control.Monad.State
 import Data.Map (Map)
@@ -8,8 +8,10 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Text.Show.Pretty
 
+import Control.Carrier.Fresh.Strict
+
 --import P4FM
-import P4FM_LogicT
+import P4FM_Effect
 
 -- examples
 
@@ -45,7 +47,7 @@ expId4 =
 
 test :: Exp -> IO String
 test exp = do
-  (result, _int) <- runStateT (workListFixExp exp) 0
+  let result = run $ evalFresh 0 (workListFixExp exp)
   let (c,s,k) = simplifyAddr result
   pure $ ppShow ("Config", c, "Store", s, "Stack", k)
 

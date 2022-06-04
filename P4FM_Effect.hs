@@ -119,7 +119,7 @@ stackPop = do
   Map.lookup oldStackTop <$> gets sStack >>= \case
     Nothing     -> fail $ "missing stack frame for: " ++ show oldStackTop
     Just frames -> do
-      (frame, newStackTop) <- oneOf $ Set.toList frames
+      (frame, newStackTop) <- oneOf frames
       modify $ \s -> s {sStackTop = newStackTop}
       pure frame
 
@@ -142,7 +142,7 @@ abstractEval localEnv exp = do
   case exp of
     LetApp (y, f, ae) e -> do
       funValSet <- abstractAtomicEval localEnv f
-      (Lam x lamBody, lamEnv) <- oneOf $ Set.toList funValSet
+      (Lam x lamBody, lamEnv) <- oneOf funValSet
       arg <- abstractAtomicEval localEnv ae
 
       -- HINT: bind arg

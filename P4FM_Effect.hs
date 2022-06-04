@@ -111,7 +111,7 @@ stackPush frame = do
     , sStackTop = newStackTop
     }
 
-stackPop :: M sig m =>m Frame
+stackPop :: M sig m => m Frame
 stackPop = do
   oldStackTop <- gets sStackTop
   when (oldStackTop == KAddr AddrHalt) $ do

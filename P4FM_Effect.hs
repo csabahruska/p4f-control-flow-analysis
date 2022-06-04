@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, LambdaCase #-}
+{-# LANGUAGE RecordWildCards, LambdaCase, ConstraintKinds #-}
 module P4FM_Effect where
 
 import Control.Applicative
@@ -66,8 +66,14 @@ data AAMState
   }
   deriving (Show, Eq, Ord)
 
---type M = StateT AAMState (LogicT D)
---type D = StateT Int IO
+type M sig m =
+  ( Has (State AAMState) sig m
+  , Has NonDet sig m
+  , Has Fail sig m
+  , Has Fresh sig m
+  , MonadFail m
+  , Alternative m
+  )
 
 {-
   Env and Store
@@ -75,25 +81,19 @@ data AAMState
 extendEnv :: Id -> Addr -> Env -> Env
 extendEnv var addr env = Map.insert var addr env
 
-extendStore
-  :: Has (State AAMState) sig m
-  => Set Clo -> Addr -> m ()
+extendStore :: M sig m => Set Clo -> Addr -> m ()
 extendStore val addr = do
   modify $ \s@AAMState{..} -> s {sStore = Map.insertWith Set.union addr val sStore}
 
 {-
   Allocator
 -}
-alloc
-  :: Has Fresh sig m
-  => Id -> Exp -> m Addr
+alloc :: M sig m => Id -> Exp -> m Addr
 alloc var exp = do
   -- TODO: use the right abstract allocator
   AddrInt <$> fresh
 
-allocK
-  :: Has Fresh sig m
-  => m KAddr
+allocK :: M sig m => m KAddr
 allocK = do
   -- TODO: use the right abstract allocator
   KAddr . AddrInt <$> fresh
@@ -101,10 +101,7 @@ allocK = do
 {-
   Stack
 -}
-stackPush ::
-  ( Has Fresh sig m
-  , Has (State AAMState) sig m
-  ) => Frame -> m ()
+stackPush :: M sig m => Frame -> m ()
 stackPush frame = do
   newStackTop <- allocK -- TODO: add access to the necessary information
   oldStackTop <- gets sStackTop
@@ -114,14 +111,7 @@ stackPush frame = do
     , sStackTop = newStackTop
     }
 
-stackPop ::
-  ( Has (State AAMState) sig m
-  , Has NonDet sig m
-  , Has Fail sig m
-  , MonadFail m
-  , Alternative m
-  )
-  => m Frame
+stackPop :: M sig m =>m Frame
 stackPop = do
   oldStackTop <- gets sStackTop
   when (oldStackTop == KAddr AddrHalt) $ do
@@ -137,9 +127,7 @@ stackPop = do
   Eval
 -}
 
-abstractAtomicEval
-  :: Has (State AAMState) sig m
-  => Env -> AExp -> m (Set Clo)
+abstractAtomicEval :: M sig m => Env -> AExp -> m (Set Clo)
 abstractAtomicEval localEnv exp = do
   store <- gets sStore
   case exp of
@@ -149,14 +137,7 @@ abstractAtomicEval localEnv exp = do
     _ -> error $ "unsupported atomic expression: " ++ show exp
 
 
-abstractEval ::
-  ( Has (State AAMState) sig m
-  , Has NonDet sig m
-  , Has Fail sig m
-  , Has Fresh sig m
-  , MonadFail m
-  , Alternative m
-  ) => Env -> Exp -> m (Exp, Env)
+abstractEval :: M sig m => Env -> Exp -> m (Exp, Env)
 abstractEval localEnv exp = do
   case exp of
     LetApp (y, f, ae) e -> do
